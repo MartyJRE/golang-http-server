@@ -160,9 +160,9 @@ func (parser *Request) Headers() (map[string]string, error) {
         if len(parts) != 2 {
             return nil, errors.New("header was malformed")
         }
-        strings.TrimSpace(parts[0])
-        strings.TrimSpace(parts[1])
-        parser.headers[parts[0]] = parts[1]
+        key := strings.TrimSpace(parts[0])
+        val := strings.TrimSpace(parts[1])
+        parser.headers[key] = val
     }
 
     return parser.headers, nil
@@ -175,6 +175,14 @@ func (parser *Request) Body() []byte {
 
     splitLines := parser.SplitLines()
     return []byte(splitLines[len(splitLines)-1])
+}
+
+func (parser *Request) GetHeader(header string) (string, error) {
+    headers, err := parser.Headers()
+    if err != nil {
+        return "", err
+    }
+    return headers[header], nil
 }
 
 type Server struct {
@@ -315,6 +323,16 @@ func main() {
         response.SetHeader("Content-Type", "text/plain")
         param := context.params["str"]
         response.SetBody([]byte(param))
+        return nil
+    })
+    server.RegisterHandler("/user-agent", func(request *Request, response *Response, context *Context) error {
+        response.SetStatusCode(200)
+        response.SetHeader("Content-Type", "text/plain")
+        userAgent, err := request.GetHeader("User-Agent")
+        if err != nil {
+            return err
+        }
+        response.SetBody([]byte(userAgent))
         return nil
     })
     server.Start()
