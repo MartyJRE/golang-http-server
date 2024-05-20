@@ -197,16 +197,7 @@ type Server struct {
     regex       *regexp.Regexp
 }
 
-func (server *Server) Start() {
-    listener, bindError := net.Listen(server.protocol, server.fullAddress)
-    if bindError != nil {
-        log.Fatalf("Failed to bind to port %d\n", server.port)
-    }
-    server.listener = listener
-    connection, acceptError := server.listener.Accept()
-    if acceptError != nil {
-        log.Fatalln("Error accepting connection: ", acceptError.Error())
-    }
+func (server *Server) HandleConnection(connection net.Conn) {
     buffer := make([]byte, BufferSize)
     _, readError := connection.Read(buffer)
     if readError != nil {
@@ -269,9 +260,24 @@ func (server *Server) Start() {
     log.Printf("Path %s doesn't exist!\n", path)
     response := NewResponse()
     response.SetStatusCode(404)
-    _, bindError = connection.Write(response.Build())
+    _, writeError := connection.Write(response.Build())
+    if writeError != nil {
+        log.Fatalln("Failed to write response: ", writeError.Error())
+    }
+}
+
+func (server *Server) Start() {
+    listener, bindError := net.Listen(server.protocol, server.fullAddress)
     if bindError != nil {
-        log.Fatalln("Failed to write response: ", bindError.Error())
+        log.Fatalf("Failed to bind to port %d\n", server.port)
+    }
+    server.listener = listener
+    for {
+        connection, acceptError := server.listener.Accept()
+        if acceptError != nil {
+            log.Fatalln("Error accepting connection: ", acceptError.Error())
+        }
+        go server.HandleConnection(connection)
     }
 }
 
