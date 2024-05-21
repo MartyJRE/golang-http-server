@@ -126,5 +126,8 @@ func (parser *Request) GetHeader(header string) (string, error) {
     if err != nil {
         return "", err
     }
-    return headers[header], nil
+    if found, ok := headers[header]; ok {
+        return found, nil
+    }
+    return "", errors.New("header missing")
 }

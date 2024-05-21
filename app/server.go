@@ -11,6 +11,8 @@ import (
     "regexp"
     "strings"
     "time"
+
+    "github.com/google/uuid"
 )
 
 type Server struct {
@@ -19,9 +21,8 @@ type Server struct {
     port        uint32
     fullAddress string
     listener    net.Listener
-    handlers    map[uint32]Handler
-    patterns    map[uint32]Pattern
-    maxId       uint32
+    handlers    map[uuid.UUID]Handler
+    patterns    map[uuid.UUID]Pattern
     regex       *regexp.Regexp
 }
 
@@ -60,7 +61,7 @@ func (server *Server) HandleConnection(connection net.Conn) {
             }
             context.PopulateParams(pattern.regex)
             response := NewResponse()
-            handlerError := handler(&request, &response, &context)
+            handlerError := handler.GetHandler()(&request, &response, &context)
             if handlerError != nil {
                 errorResponse := NewResponse()
                 errorResponse.SetStatusCode(500)
@@ -105,7 +106,9 @@ func (server *Server) Start() {
     }
 }
 
-func (server *Server) RegisterHandler(method string, path string, handler Handler) {
+//func (request *Request)
+
+func (server *Server) RegisterHandler(method string, path string, name string, handlerFunc HandlerFunc) {
     found := server.regex.FindAllString(path, -1)
     replacedPath := "^" + path + "$"
     for _, str := range found {
@@ -115,31 +118,21 @@ func (server *Server) RegisterHandler(method string, path string, handler Handle
         replacedPath = strings.Replace(replacedPath, this, that, 1)
     }
     regex := regexp.MustCompile(replacedPath)
-    id := server.maxId + 1
+    id := uuid.New()
     server.patterns[id] = NewPattern(regex, method)
-    server.handlers[id] = func(request *Request, response *Response, context *Context) error {
-        log.Printf("Starting execution of handler %d\n", id)
-        start := time.Now()
-        result := handler(request, response, context)
-        took := time.Since(start)
-        log.Printf("Finished execution of handler %d - took: %s\n", id, DurationToTook(&took))
-        return result
-    }
-    server.maxId = id
+    server.handlers[id] = NewHandler(name, handlerFunc)
 }
 
 func DurationToTook(dur *time.Duration) string {
     return fmt.Sprintf(
-        "%2.f s %d ms %d µs %d ns",
+        "~%fs (%dns)",
         dur.Seconds(),
-        dur.Milliseconds(),
-        dur.Microseconds(),
         dur.Nanoseconds(),
     )
 }
 
 func (server *Server) SetupFileSystem(directory string) {
-    server.RegisterHandler("get", "/files/{filename}", func(request *Request, response *Response, context *Context) error {
+    server.RegisterHandler("get", "/files/{filename}", "Get file", func(request *Request, response *Response, context *Context) error {
         filename := context.params["filename"]
         info, err := os.Stat(directory + filename)
         if os.IsNotExist(err) {
@@ -169,7 +162,7 @@ func (server *Server) SetupFileSystem(directory string) {
         response.SetBody(data)
         return nil
     })
-    server.RegisterHandler("post", "/files/{filename}", func(request *Request, response *Response, context *Context) error {
+    server.RegisterHandler("post", "/files/{filename}", "Create file", func(request *Request, response *Response, context *Context) error {
         filename := context.params["filename"]
         file, err := os.Create(directory + filename)
         if err != nil {
@@ -181,7 +174,6 @@ func (server *Server) SetupFileSystem(directory string) {
                 log.Fatalln("Failed to close a file", fileErr.Error())
             }
         }(file)
-        log.Println(request.Body())
         _, err = file.Write(request.Body())
         if err != nil {
             return err
@@ -199,14 +191,17 @@ func NewServer(protocol string, address string, port uint32) Server {
         address:     address,
         port:        port,
         fullAddress: fullAddress,
-        handlers: map[uint32]Handler{
-            0: func(req *Request, res *Response, _ *Context) error {
-                res.SetStatusCode(200)
-                return nil
+        handlers: map[uuid.UUID]Handler{
+            {0}: {
+                name: "Default",
+                handler: func(_ *Request, res *Response, _ *Context) error {
+                    res.SetStatusCode(200)
+                    return nil
+                },
             },
         },
-        patterns: map[uint32]Pattern{
-            0: Pattern{
+        patterns: map[uuid.UUID]Pattern{
+            {0}: {
                 regex:  regexp.MustCompile("^/$"),
                 method: "get",
             },

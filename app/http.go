@@ -15,14 +15,14 @@ func main() {
         directory := args[1]
         server.SetupFileSystem(directory)
     }
-    server.RegisterHandler("get", "/echo/{str}", func(request *Request, response *Response, context *Context) error {
+    server.RegisterHandler("get", "/echo/{str}", "Echo", func(request *Request, response *Response, context *Context) error {
         response.SetStatusCode(200)
         response.SetHeader("Content-Type", "text/plain")
         param := context.params["str"]
         response.SetBody([]byte(param))
         return nil
     })
-    server.RegisterHandler("get", "/user-agent", func(request *Request, response *Response, context *Context) error {
+    server.RegisterHandler("get", "/user-agent", "User agent", func(request *Request, response *Response, context *Context) error {
         response.SetStatusCode(200)
         response.SetHeader("Content-Type", "text/plain")
         userAgent, err := request.GetHeader("User-Agent")
