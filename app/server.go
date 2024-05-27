@@ -71,13 +71,18 @@ func (server *Server) HandleConnection(connection net.Conn) {
 
 var ValidEncodings = []string{"gzip"}
 
-func IsValidEncoding(encoding string) bool {
+func ResolveValidEncodings(encodingStr string) []string {
+    valid := make([]string, 0)
+    encodings := strings.Split(encodingStr, ",")
     for _, v := range ValidEncodings {
-        if v == encoding {
-            return true
+        for _, encoding := range encodings {
+            enc := strings.TrimSpace(encoding)
+            if v == enc {
+                valid = append(valid, v)
+            }
         }
     }
-    return false
+    return valid
 }
 
 func (server *Server) HandleRequest(connection net.Conn, request Request, pattern Pattern, handler Handler, protocol float32, method string, path string) bool {
@@ -94,8 +99,10 @@ func (server *Server) HandleRequest(connection net.Conn, request Request, patter
     response := NewResponse()
     handlerError := handler.handler(&request, &response, &context)
     if acceptEncoding, err := request.GetHeader("Accept-Encoding"); err == nil {
-        if IsValidEncoding(acceptEncoding) {
-            response.SetHeader("Content-Encoding", acceptEncoding)
+        encodings := ResolveValidEncodings(acceptEncoding)
+        contentEncoding := strings.Join(encodings, ", ")
+        if len(contentEncoding) != 0 {
+            response.SetHeader("Content-Encoding", contentEncoding)
         }
     }
     if handlerError != nil {
