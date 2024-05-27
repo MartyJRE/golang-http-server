@@ -41,7 +41,7 @@ func main() {
             }
             response.SetStatusCode(200)
             response.SetHeader("Content-Type", "application/octet-stream")
-            response.SetBody(data)
+            response.SetBody(string(data))
             return nil
         })
         server.RegisterHandler("post", "/files/{filename}", "Create file", func(request *Request, response *Response, context *Context) error {
@@ -68,7 +68,7 @@ func main() {
         response.SetStatusCode(200)
         response.SetHeader("Content-Type", "text/plain")
         param := context.params["str"]
-        response.SetBody([]byte(param))
+        response.SetBody(param)
         return nil
     })
     server.RegisterHandler("get", "/user-agent", "User agent", func(request *Request, response *Response, context *Context) error {
@@ -78,7 +78,7 @@ func main() {
         if err != nil {
             return err
         }
-        response.SetBody([]byte(userAgent))
+        response.SetBody(userAgent)
         return nil
     })
     server.Start()

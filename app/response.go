@@ -12,7 +12,7 @@ type Response struct {
     statusCode uint16
     message    string
     headers    Headers
-    body       []byte
+    body       string
 }
 
 func NewResponse() Response {
@@ -51,7 +51,7 @@ func (response *Response) BuildHeaders() string {
     return result
 }
 
-func (response *Response) SetBody(data []byte) {
+func (response *Response) SetBody(data string) {
     contentLength := len(data)
     response.SetHeader("Content-Length", fmt.Sprintf("%d", contentLength))
     response.body = data
@@ -61,7 +61,7 @@ func (response *Response) EncodeBody(encoding string) {
     switch encoding {
     case GZip:
         {
-            buff := bytes.Buffer{}
+            var buff bytes.Buffer
             gz := gzip.NewWriter(&buff)
             defer func(gz *gzip.Writer) {
                 err := gz.Close()
@@ -70,7 +70,7 @@ func (response *Response) EncodeBody(encoding string) {
                 }
             }(gz)
 
-            _, err := gz.Write(response.body)
+            _, err := gz.Write([]byte(response.body))
             if err != nil {
                 log.Fatalln("Failed to write to gzip writer!", err)
             }
@@ -78,7 +78,9 @@ func (response *Response) EncodeBody(encoding string) {
             if err != nil {
                 log.Fatalln("Failed to flush gzip writer!", err)
             }
-            response.SetBody(buff.Bytes())
+
+            // FIXME: doesn't work
+            response.SetBody(buff.String())
         }
     }
 }
