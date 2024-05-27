@@ -1,7 +1,10 @@
 package main
 
 import (
+    "bytes"
+    "compress/gzip"
     "fmt"
+    "log"
 )
 
 type Response struct {
@@ -52,4 +55,30 @@ func (response *Response) SetBody(data []byte) {
     contentLength := len(data)
     response.SetHeader("Content-Length", fmt.Sprintf("%d", contentLength))
     response.body = data
+}
+
+func (response *Response) EncodeBody(encoding string) {
+    switch encoding {
+    case GZip:
+        {
+            buff := bytes.Buffer{}
+            gz := gzip.NewWriter(&buff)
+            defer func(gz *gzip.Writer) {
+                err := gz.Close()
+                if err != nil {
+                    log.Fatalln("Failed to close gzip writer!", err)
+                }
+            }(gz)
+
+            _, err := gz.Write(response.body)
+            if err != nil {
+                log.Fatalln("Failed to write to gzip writer!", err)
+            }
+            err = gz.Flush()
+            if err != nil {
+                log.Fatalln("Failed to flush gzip writer!", err)
+            }
+            response.SetBody(buff.Bytes())
+        }
+    }
 }
