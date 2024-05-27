@@ -104,8 +104,8 @@ func (parser *Request) Headers() (Headers, error) {
         if len(parts) != 2 {
             return nil, errors.New("header was malformed")
         }
-        key := strings.TrimSpace(parts[0])
-        val := strings.TrimSpace(parts[1])
+        key := strings.ToLower(strings.TrimSpace(parts[0]))
+        val := strings.ToLower(strings.TrimSpace(parts[1]))
         parser.headers[key] = val
     }
 
@@ -122,11 +122,12 @@ func (parser *Request) Body() []byte {
 }
 
 func (parser *Request) GetHeader(header string) (string, error) {
+    key := strings.ToLower(header)
     headers, err := parser.Headers()
     if err != nil {
         return "", err
     }
-    if found, ok := headers[header]; ok {
+    if found, ok := headers[key]; ok {
         return found, nil
     }
     return "", errors.New("header missing")

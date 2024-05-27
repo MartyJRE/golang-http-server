@@ -4,10 +4,8 @@ import (
     "bufio"
     "bytes"
     "fmt"
-    "io/fs"
     "log"
     "net"
-    "os"
     "regexp"
     "strings"
     "time"
@@ -16,14 +14,15 @@ import (
 )
 
 type Server struct {
-    protocol    string
-    address     string
-    port        uint32
-    fullAddress string
-    listener    net.Listener
-    handlers    map[uuid.UUID]Handler
-    patterns    map[uuid.UUID]Pattern
-    regex       *regexp.Regexp
+    protocol      string
+    address       string
+    port          uint32
+    fullAddress   string
+    listener      net.Listener
+    handlers      map[uuid.UUID]Handler
+    patterns      map[uuid.UUID]Pattern
+    patternRegex  *regexp.Regexp
+    encodingRegex *regexp.Regexp
 }
 
 func (server *Server) HandleConnection(connection net.Conn) {
@@ -55,28 +54,7 @@ func (server *Server) HandleConnection(connection net.Conn) {
         if pattern, ok := server.patterns[handlerId]; !ok {
             log.Fatalln("No such pattern exists!", pattern)
         } else if strings.ToLower(method) == pattern.method && pattern.regex.Match([]byte(path)) {
-            context, contextErr := ContextFromRequest(&request)
-            if contextErr != nil {
-                log.Fatalln(fmt.Sprintf("Error creating context: %s", contextErr.Error()))
-            }
-            context.PopulateParams(pattern.regex)
-            response := NewResponse()
-            handlerError := handler.GetHandler()(&request, &response, &context)
-            if handlerError != nil {
-                errorResponse := NewResponse()
-                errorResponse.SetStatusCode(500)
-                log.Println(fmt.Sprintf("[HTTP/%.1f] %s - %s : %d", protocol, method, path, errorResponse.statusCode))
-                _, writeError := connection.Write(errorResponse.Build())
-                if writeError != nil {
-                    log.Fatalln("Failed to write response: ", writeError.Error())
-                }
-                return
-            } else {
-                _, writeError := connection.Write(response.Build())
-                log.Println(fmt.Sprintf("[HTTP/%.1f] %s - %s : %d", protocol, method, path, response.statusCode))
-                if writeError != nil {
-                    log.Fatalln("Failed to write response: ", writeError.Error())
-                }
+            if server.HandleRequest(connection, request, pattern, handler, protocol, method, path) {
                 return
             }
         }
@@ -89,6 +67,55 @@ func (server *Server) HandleConnection(connection net.Conn) {
     if writeError != nil {
         log.Fatalln("Failed to write response: ", writeError.Error())
     }
+}
+
+var ValidEncodings = []string{"gzip"}
+
+func IsValidEncoding(encoding string) bool {
+    for _, v := range ValidEncodings {
+        if v == encoding {
+            return true
+        }
+    }
+    return false
+}
+
+func (server *Server) HandleRequest(connection net.Conn, request Request, pattern Pattern, handler Handler, protocol float32, method string, path string) bool {
+    start := time.Now()
+    defer func() {
+        duration := time.Since(start)
+        log.Printf("[HTTP/%.1f] %s - %s - took: %s", protocol, method, path, DurationToTook(&duration))
+    }()
+    context, contextErr := ContextFromRequest(&request)
+    if contextErr != nil {
+        log.Fatalln(fmt.Sprintf("Error creating context: %s", contextErr.Error()))
+    }
+    context.PopulateParams(pattern.regex)
+    response := NewResponse()
+    handlerError := handler.handler(&request, &response, &context)
+    if acceptEncoding, err := request.GetHeader("Accept-Encoding"); err == nil {
+        if IsValidEncoding(acceptEncoding) {
+            response.SetHeader("Content-Encoding", acceptEncoding)
+        }
+    }
+    if handlerError != nil {
+        errorResponse := NewResponse()
+        errorResponse.SetStatusCode(500)
+        log.Println(fmt.Sprintf("[HTTP/%.1f] %s - %s : %d", protocol, method, path, errorResponse.statusCode))
+        _, writeError := connection.Write(errorResponse.Build())
+        if writeError != nil {
+            log.Fatalln("Failed to write response: ", writeError.Error())
+        }
+        return true
+    } else {
+        _, writeError := connection.Write(response.Build())
+        log.Println(fmt.Sprintf("[HTTP/%.1f] %s - %s : %d", protocol, method, path, response.statusCode))
+        if writeError != nil {
+            log.Fatalln("Failed to write response: ", writeError.Error())
+        }
+        return true
+    }
+    return false
 }
 
 func (server *Server) Start() {
@@ -106,10 +133,8 @@ func (server *Server) Start() {
     }
 }
 
-//func (request *Request)
-
 func (server *Server) RegisterHandler(method string, path string, name string, handlerFunc HandlerFunc) {
-    found := server.regex.FindAllString(path, -1)
+    found := server.patternRegex.FindAllString(path, -1)
     replacedPath := "^" + path + "$"
     for _, str := range found {
         str = strings.TrimRight(strings.TrimLeft(str, "{"), "}")
@@ -124,63 +149,13 @@ func (server *Server) RegisterHandler(method string, path string, name string, h
 }
 
 func DurationToTook(dur *time.Duration) string {
-    return fmt.Sprintf(
-        "~%fs (%dns)",
-        dur.Seconds(),
-        dur.Nanoseconds(),
-    )
-}
-
-func (server *Server) SetupFileSystem(directory string) {
-    server.RegisterHandler("get", "/files/{filename}", "Get file", func(request *Request, response *Response, context *Context) error {
-        filename := context.params["filename"]
-        info, err := os.Stat(directory + filename)
-        if os.IsNotExist(err) {
-            return err
-        }
-        if info.IsDir() {
-            response.SetStatusCode(404)
-            return nil
-        }
-        file, err := os.OpenFile(directory+filename, os.O_RDONLY, fs.ModeTemporary)
-        if err != nil {
-            return err
-        }
-        defer func(file *os.File) {
-            fileErr := file.Close()
-            if fileErr != nil {
-                log.Fatalln("Failed to close a file", fileErr.Error())
-            }
-        }(file)
-        data := make([]byte, info.Size())
-        _, err = file.Read(data)
-        if err != nil {
-            return err
-        }
-        response.SetStatusCode(200)
-        response.SetHeader("Content-Type", "application/octet-stream")
-        response.SetBody(data)
-        return nil
-    })
-    server.RegisterHandler("post", "/files/{filename}", "Create file", func(request *Request, response *Response, context *Context) error {
-        filename := context.params["filename"]
-        file, err := os.Create(directory + filename)
-        if err != nil {
-            return err
-        }
-        defer func(file *os.File) {
-            fileErr := file.Close()
-            if fileErr != nil {
-                log.Fatalln("Failed to close a file", fileErr.Error())
-            }
-        }(file)
-        _, err = file.Write(request.Body())
-        if err != nil {
-            return err
-        }
-        response.SetStatusCode(201)
-        return nil
-    })
+    if dur.Nanoseconds() < 1000 {
+        return fmt.Sprintf("%d ns", dur.Nanoseconds())
+    }
+    if dur.Microseconds() < 1000 {
+        return fmt.Sprintf("%d µs", dur.Microseconds())
+    }
+    return fmt.Sprintf("%d ms", dur.Milliseconds())
 }
 
 func NewServer(protocol string, address string, port uint32) Server {
@@ -206,6 +181,7 @@ func NewServer(protocol string, address string, port uint32) Server {
                 method: "get",
             },
         },
-        regex: regexp.MustCompile("\\{([a-z]\\w+)}"),
+        patternRegex:  regexp.MustCompile("\\{([a-z]\\w+)}"),
+        encodingRegex: regexp.MustCompile(".+/.+"),
     }
 }
